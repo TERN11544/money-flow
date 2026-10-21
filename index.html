@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#24483f" />
+    <meta name="description" content="เว็บจดรายรับรายจ่ายและติดตาม subscription ส่วนตัว" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>รายรับรายจ่าย | Money Flow</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="เมนูหลัก">
+        <a class="brand" href="#dashboard" aria-label="Money Flow หน้าหลัก">
+          <span class="brand-mark" aria-hidden="true">฿</span>
+          <span>Money<br /><em>Flow</em></span>
+        </a>
+        <nav class="side-nav">
+          <button class="nav-link is-active" type="button" data-view="dashboard">
+            <span aria-hidden="true">⌂</span> ภาพรวม
+          </button>
+          <button class="nav-link" type="button" data-view="transactions">
+            <span aria-hidden="true">↕</span> รายการทั้งหมด
+          </button>
+          <button class="nav-link" type="button" data-view="subscriptions">
+            <span aria-hidden="true">⟳</span> Subscriptions
+          </button>
+        </nav>
+        <div class="sidebar-bottom">
+          <p>ข้อมูลของคุณบันทึก<br />อยู่ในอุปกรณ์นี้</p>
+          <button class="text-button" id="reset-data" type="button">เริ่มข้อมูลใหม่</button>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="page-kicker">ภาพรวมการเงิน</p>
+            <h1 id="page-title">สวัสดี, วันนี้เงินไหลไปทางไหนบ้าง?</h1>
+          </div>
+          <div class="top-actions">
+            <button class="icon-button" id="theme-toggle" type="button" aria-label="สลับธีมสี">◐</button>
+            <button class="primary-button" id="open-transaction" type="button"><span>＋</span> เพิ่มรายการ</button>
+          </div>
+        </header>
+
+        <section class="view is-visible" id="dashboard-view" data-view-panel="dashboard">
+          <div class="month-line">
+            <button class="month-button" type="button" id="previous-month" aria-label="เดือนก่อนหน้า">‹</button>
+            <strong id="current-month-label">เดือนนี้</strong>
+            <button class="month-button" type="button" id="next-month" aria-label="เดือนถัดไป">›</button>
+          </div>
+
+          <section class="summary-grid" aria-label="สรุปรายรับรายจ่าย">
+            <article class="balance-card">
+              <p>ยอดคงเหลือ</p>
+              <strong id="balance-total">฿0</strong>
+              <span id="balance-detail">เริ่มต้นด้วยการเพิ่มรายการ</span>
+              <div class="balance-orb orb-one" aria-hidden="true"></div>
+              <div class="balance-orb orb-two" aria-hidden="true"></div>
+            </article>
+            <article class="stat-card income-card">
+              <span class="stat-icon" aria-hidden="true">↗</span>
+              <div><p>รายรับเดือนนี้</p><strong id="income-total">฿0</strong><small id="income-count">0 รายการ</small></div>
+            </article>
+            <article class="stat-card expense-card">
+              <span class="stat-icon" aria-hidden="true">↘</span>
+              <div><p>รายจ่ายเดือนนี้</p><strong id="expense-total">฿0</strong><small id="expense-count">0 รายการ</small></div>
+            </article>
+          </section>
+
+          <section class="dashboard-grid">
+            <article class="panel spend-panel">
+              <div class="panel-heading">
+                <div><p class="eyebrow">ภาพรวม</p><h2>ใช้จ่ายกับอะไร</h2></div>
+                <span class="panel-badge" id="top-category">—</span>
+              </div>
+              <div class="category-chart" id="category-chart" aria-live="polite"></div>
+            </article>
+            <article class="panel subscription-preview">
+              <div class="panel-heading">
+                <div><p class="eyebrow">ค่าใช้จ่ายประจำ</p><h2>Subscriptions</h2></div>
+                <button class="arrow-link" type="button" data-go-to="subscriptions" aria-label="ดู subscriptions ทั้งหมด">→</button>
+              </div>
+              <div id="subscription-preview-list" class="subscription-list compact-list"></div>
+              <div class="subscription-total-row"><span>เฉลี่ยต่อเดือน</span><strong id="subscription-monthly-total">฿0</strong></div>
+            </article>
+          </section>
+
+          <section class="panel recent-panel">
+            <div class="panel-heading">
+              <div><p class="eyebrow">ล่าสุด</p><h2>รายการเคลื่อนไหว</h2></div>
+              <button class="text-button" type="button" data-go-to="transactions">ดูทั้งหมด</button>
+            </div>
+            <div class="transaction-list" id="recent-transactions"></div>
+          </section>
+        </section>
+
+        <section class="view" id="transactions-view" data-view-panel="transactions">
+          <div class="view-toolbar">
+            <div class="filter-group" role="group" aria-label="กรองประเภท">
+              <button class="filter-chip is-selected" type="button" data-type-filter="all">ทั้งหมด</button>
+              <button class="filter-chip" type="button" data-type-filter="expense">รายจ่าย</button>
+              <button class="filter-chip" type="button" data-type-filter="income">รายรับ</button>
+            </div>
+            <label class="search-box"><span aria-hidden="true">⌕</span><input id="transaction-search" type="search" placeholder="ค้นหารายการ" /></label>
+          </div>
+          <section class="panel all-transactions-panel">
+            <div class="panel-heading">
+              <div><p class="eyebrow">ประวัติการเงิน</p><h2>รายการทั้งหมด</h2></div>
+              <button class="secondary-button" id="add-transaction-inline" type="button">＋ เพิ่มรายการ</button>
+            </div>
+            <div class="transaction-list large-list" id="all-transactions"></div>
+          </section>
+        </section>
+
+        <section class="view" id="subscriptions-view" data-view-panel="subscriptions">
+          <section class="subscription-hero">
+            <div>
+              <p class="eyebrow">รายจ่ายที่เกิดซ้ำ</p>
+              <h2>Subscription ของคุณ</h2>
+              <p>เห็นภาพชัดเจนว่าแต่ละเดือนมีค่าใช้จ่ายประจำเท่าไร</p>
+            </div>
+            <div class="subscription-hero-total"><span>เฉลี่ยต่อเดือน</span><strong id="subscription-hero-total">฿0</strong></div>
+          </section>
+          <div class="subscription-action-row">
+            <p id="subscription-status">ยังไม่มี subscription</p>
+            <button class="primary-button" id="open-subscription" type="button"><span>＋</span> เพิ่ม subscription</button>
+          </div>
+          <section class="subscription-grid" id="subscription-grid"></section>
+        </section>
+      </main>
+
+      <nav class="mobile-nav" aria-label="เมนูมือถือ">
+        <button class="mobile-nav-link is-active" type="button" data-view="dashboard"><span>⌂</span>ภาพรวม</button>
+        <button class="mobile-nav-link" type="button" data-view="transactions"><span>↕</span>รายการ</button>
+        <button class="mobile-nav-link" type="button" data-view="subscriptions"><span>⟳</span>Sub</button>
+      </nav>
+    </div>
+
+    <dialog class="modal" id="transaction-dialog" aria-labelledby="transaction-dialog-title">
+      <form class="modal-card" id="transaction-form" method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow">บันทึกการเคลื่อนไหว</p><h2 id="transaction-dialog-title">เพิ่มรายการ</h2></div><button class="close-button" type="button" data-close-dialog="transaction-dialog" aria-label="ปิด">×</button></div>
+        <input id="transaction-id" type="hidden" />
+        <div class="type-toggle" role="group" aria-label="ประเภทรายการ"><button class="type-choice is-active" type="button" data-form-type="expense">รายจ่าย</button><button class="type-choice" type="button" data-form-type="income">รายรับ</button></div>
+        <input id="transaction-type" type="hidden" value="expense" />
+        <label class="field amount-field"><span>จำนวนเงิน</span><div><b>฿</b><input id="transaction-amount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0.00" required /></div></label>
+        <label class="field"><span>ชื่อรายการ</span><input id="transaction-note" type="text" maxlength="80" placeholder="เช่น กาแฟ, เงินเดือน" required /></label>
+        <div class="form-row"><label class="field"><span>หมวดหมู่</span><select id="transaction-category" required></select></label><label class="field"><span>วันที่</span><input id="transaction-date" type="date" required /></label></div>
+        <button class="primary-button submit-button" type="submit">บันทึกรายการ</button>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="subscription-dialog" aria-labelledby="subscription-dialog-title">
+      <form class="modal-card" id="subscription-form" method="dialog">
+        <div class="modal-heading"><div><p class="eyebrow">ค่าใช้จ่ายประจำ</p><h2 id="subscription-dialog-title">เพิ่ม subscription</h2></div><button class="close-button" type="button" data-close-dialog="subscription-dialog" aria-label="ปิด">×</button></div>
+        <input id="subscription-id" type="hidden" />
+        <div class="form-row"><label class="field"><span>ชื่อบริการ</span><input id="subscription-name" type="text" maxlength="50" placeholder="เช่น Netflix" required /></label><label class="field"><span>ไอคอน</span><input id="subscription-icon" type="text" maxlength="4" value="✦" aria-label="ไอคอน emoji" /></label></div>
+        <div class="form-row"><label class="field amount-field"><span>ราคา</span><div><b>฿</b><input id="subscription-price" type="number" min="0.01" step="0.01" inputmode="decimal" required /></div></label><label class="field"><span>รอบเรียกเก็บ</span><select id="subscription-interval"><option value="monthly">รายเดือน</option><option value="yearly">รายปี</option></select></label></div>
+        <div class="form-row"><label class="field"><span>หมวดหมู่</span><select id="subscription-category"></select></label><label class="field"><span>ตัดเงินครั้งถัดไป</span><input id="subscription-next-date" type="date" required /></label></div>
+        <button class="primary-button submit-button" type="submit">บันทึก subscription</button>
+      </form>
+    </dialog>
+
+    <template id="empty-state-template"><div class="empty-state"><span>◌</span><p></p></div></template>
+    <script src="app.js"></script>
+  </body>
+</html>
