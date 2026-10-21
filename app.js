@@ -17,6 +17,8 @@
 
   const el = (selector) => document.querySelector(selector);
   const all = (selector) => [...document.querySelectorAll(selector)];
+  const SYNC_MARKER_KEY = 'money-flow-cloud-sync-marker-v1';
+  const SYNC_BACKUP_KEY = 'money-flow-cloud-conflict-backup-v1';
   const money = new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', maximumFractionDigits: 0 });
   const dateFormatter = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
   const monthFormatter = new Intl.DateTimeFormat('th-TH', { month: 'long', year: 'numeric' });
@@ -51,13 +53,24 @@
     return seed();
   }
 
+  let localDataExists = Boolean(localStorage.getItem(STORAGE_KEY));
   let data = loadData();
   let activeView = 'dashboard';
   let visibleMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   let transactionTypeFilter = 'all';
   let searchTerm = '';
+  let cloudSession = null;
+  let cloudReady = false;
+  let cloudBusy = false;
+  let cloudTimer = null;
+  let cloudPollTimer = null;
+  let pendingCloudChoice = null;
 
-  function saveData() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+  function saveData() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localDataExists = true;
+    scheduleCloudSync();
+  }
   function categoryFor(key) { return categoryMeta[key] || categoryMeta.other; }
   function formatMoney(value) { return money.format(Number(value) || 0); }
   function toDate(dateString) { return new Date(`${dateString}T12:00:00`); }
@@ -172,6 +185,253 @@
 
   function renderAll() { renderDashboard(); renderTransactions(); renderSubscriptions(); applyTheme(); }
   function applyTheme() { document.body.classList.toggle('dark', data.theme === 'dark'); }
+
+  function cloneData(value) { return JSON.parse(JSON.stringify(value)); }
+  function emptyData() { return { theme: data.theme, transactions: [], subscriptions: [] }; }
+  function stableStringify(value) {
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+    if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+    return JSON.stringify(value);
+  }
+  function sameData(left, right) { return left != null && right != null && stableStringify(left) === stableStringify(right); }
+  function readSyncMarker() {
+    try { return JSON.parse(localStorage.getItem(SYNC_MARKER_KEY)); } catch (_) { return null; }
+  }
+  function writeSyncMarker(userId, snapshot) {
+    localStorage.setItem(SYNC_MARKER_KEY, JSON.stringify({ userId, data: snapshot ? cloneData(snapshot) : null }));
+  }
+  function backupData(source, snapshot) {
+    if (!snapshot) return;
+    localStorage.setItem(SYNC_BACKUP_KEY, JSON.stringify({ source, savedAt: new Date().toISOString(), data: snapshot }));
+  }
+  function setSyncStatus(message) {
+    el('#sync-message').textContent = message;
+    const caption = el('#sync-caption');
+    if (caption) caption.textContent = cloudSession ? `ซิงก์กับ ${cloudSession.user?.email || 'บัญชีของคุณ'}` : 'ข้อมูลบันทึกอยู่ในอุปกรณ์นี้';
+    const label = el('#sync-button-label');
+    if (label) label.textContent = cloudSession ? 'ซิงก์แล้ว' : 'ซิงก์';
+  }
+  function refreshSyncUI(message = null) {
+    const configured = Boolean(window.MoneyFlowCloud?.isConfigured());
+    el('#sync-not-configured').hidden = configured;
+    el('#sync-auth-form').hidden = !configured || Boolean(cloudSession);
+    el('#sync-account').hidden = !configured || !cloudSession;
+    el('#sync-account-email').textContent = cloudSession?.user?.email || '';
+    if (message) setSyncStatus(message);
+    else setSyncStatus(cloudSession ? 'บัญชีเชื่อมต่อแล้ว กำลังตรวจข้อมูล…' : 'ข้อมูลยังบันทึกในอุปกรณ์นี้');
+  }
+  function persistCurrentData() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localDataExists = true;
+    renderAll();
+  }
+  function validCloudData(value) {
+    return value && Array.isArray(value.transactions) && Array.isArray(value.subscriptions);
+  }
+  function showCloudConflict(localSnapshot, remoteSnapshot, reason) {
+    pendingCloudChoice = { localData: cloneData(localSnapshot), remoteData: remoteSnapshot ? cloneData(remoteSnapshot) : null };
+    cloudReady = false;
+    el('#sync-conflict').hidden = false;
+    el('#sync-use-cloud').textContent = remoteSnapshot ? 'ใช้ข้อมูลจากคลาวด์' : 'เริ่มด้วยข้อมูลว่าง';
+    el('#sync-conflict-copy').textContent = reason || 'พบข้อมูลต่างกัน เลือกชุดที่จะใช้ก่อน ข้อมูลอีกฝั่งจะถูกสำรองไว้บนอุปกรณ์นี้';
+    setSyncStatus('หยุดซิงก์ชั่วคราวเพื่อป้องกันข้อมูลถูกเขียนทับ');
+  }
+  function finishCloudChoice() {
+    pendingCloudChoice = null;
+    el('#sync-conflict').hidden = true;
+    cloudReady = true;
+    setSyncStatus('ข้อมูลซิงก์แล้ว');
+  }
+  function scheduleCloudSync() {
+    if (!cloudSession || !cloudReady) return;
+    clearTimeout(cloudTimer);
+    setSyncStatus('มีข้อมูลรอซิงก์…');
+    cloudTimer = setTimeout(() => {
+      if (cloudBusy) { scheduleCloudSync(); return; }
+      pushLocalData();
+    }, 650);
+  }
+  async function pushLocalData() {
+    if (!cloudSession || !cloudReady || cloudBusy) return;
+    cloudBusy = true;
+    const snapshot = cloneData(data);
+    try {
+      await window.MoneyFlowCloud.writeCloudData(snapshot);
+      writeSyncMarker(cloudSession.user.id, snapshot);
+      setSyncStatus('ข้อมูลซิงก์แล้ว');
+      if (!sameData(snapshot, data)) scheduleCloudSync();
+    } catch (error) {
+      setSyncStatus(`ซิงก์ไม่สำเร็จ แต่ข้อมูลในอุปกรณ์ยังอยู่: ${error.message}`);
+    } finally { cloudBusy = false; }
+  }
+  function applyCloudData(snapshot) {
+    if (!validCloudData(snapshot)) throw new Error('รูปแบบข้อมูลในคลาวด์ไม่ถูกต้อง');
+    data = { theme: snapshot.theme === 'dark' ? 'dark' : 'light', transactions: snapshot.transactions, subscriptions: snapshot.subscriptions };
+    persistCurrentData();
+  }
+  async function syncAgainstCloud(initial = false) {
+    if (!cloudSession || cloudBusy || pendingCloudChoice) return;
+    cloudBusy = true;
+    setSyncStatus('กำลังตรวจข้อมูลบนคลาวด์…');
+    try {
+      const userId = cloudSession.user.id;
+      const localSnapshot = cloneData(data);
+      const remoteRow = await window.MoneyFlowCloud.readCloudData();
+      const remoteSnapshot = remoteRow?.data || null;
+      if (remoteSnapshot && !validCloudData(remoteSnapshot)) throw new Error('ข้อมูลในคลาวด์ไม่ครบถ้วน');
+      const marker = readSyncMarker();
+
+      if (!remoteSnapshot) {
+        if (localDataExists) {
+          showCloudConflict(localSnapshot, null, 'บัญชีนี้ยังไม่มีข้อมูลบนคลาวด์ หากเลือกอัปโหลด ข้อมูลบนอุปกรณ์นี้จะเป็นชุดเริ่มต้น');
+        } else {
+          data = emptyData();
+          persistCurrentData();
+          writeSyncMarker(userId, null);
+          cloudReady = true;
+          scheduleCloudSync();
+        }
+        return;
+      }
+
+      if (marker?.userId === userId && marker.data) {
+        const localChanged = !sameData(localSnapshot, marker.data);
+        const remoteChanged = !sameData(remoteSnapshot, marker.data);
+        if (localChanged && remoteChanged && !sameData(localSnapshot, remoteSnapshot)) {
+          showCloudConflict(localSnapshot, remoteSnapshot, 'อุปกรณ์นี้และคลาวด์มีการแก้ไขต่างกัน เลือกข้อมูลที่จะเก็บก่อนซิงก์ต่อ');
+        } else if (localChanged && !remoteChanged) {
+          writeSyncMarker(userId, remoteSnapshot);
+          cloudReady = true;
+          scheduleCloudSync();
+        } else {
+          if (remoteChanged || !sameData(localSnapshot, remoteSnapshot)) applyCloudData(remoteSnapshot);
+          writeSyncMarker(userId, remoteSnapshot);
+          cloudReady = true;
+          setSyncStatus('ข้อมูลซิงก์แล้ว');
+        }
+        return;
+      }
+
+      if (localDataExists && !sameData(localSnapshot, remoteSnapshot)) {
+        showCloudConflict(localSnapshot, remoteSnapshot, 'พบข้อมูลที่ยังไม่เคยเชื่อมกับบัญชีนี้ เลือกว่าจะใช้ข้อมูลจากคลาวด์หรืออัปโหลดข้อมูลอุปกรณ์นี้');
+      } else {
+        if (!sameData(localSnapshot, remoteSnapshot)) applyCloudData(remoteSnapshot);
+        writeSyncMarker(userId, remoteSnapshot);
+        cloudReady = true;
+        setSyncStatus('ข้อมูลซิงก์แล้ว');
+      }
+    } catch (error) {
+      if (initial && !readSyncMarker()) cloudReady = false;
+      if (!window.MoneyFlowCloud.getSession()) {
+        cloudSession = null;
+        cloudReady = false;
+        refreshSyncUI(`เซสชันหมดอายุหรือถูกยกเลิก กรุณาเข้าสู่ระบบใหม่: ${error.message}`);
+      } else {
+        setSyncStatus(`เชื่อมคลาวด์ไม่สำเร็จ ข้อมูลในเครื่องยังปลอดภัย: ${error.message}`);
+      }
+    } finally { cloudBusy = false; }
+  }
+  async function acceptCloudChoice(useCloud) {
+    if (!pendingCloudChoice || !cloudSession) return;
+    const pending = pendingCloudChoice;
+    cloudBusy = true;
+    let syncAfter = false;
+    try {
+      if (useCloud) {
+        if (localDataExists) backupData('ข้อมูลเดิมจากอุปกรณ์', pending.localData);
+        data = pending.remoteData ? cloneData(pending.remoteData) : emptyData();
+        persistCurrentData();
+        writeSyncMarker(cloudSession.user.id, pending.remoteData);
+        finishCloudChoice();
+        syncAfter = !pending.remoteData;
+      } else {
+        backupData('ข้อมูลเดิมจากคลาวด์', pending.remoteData);
+        data = cloneData(pending.localData);
+        persistCurrentData();
+        writeSyncMarker(cloudSession.user.id, pending.remoteData);
+        finishCloudChoice();
+        syncAfter = true;
+      }
+    } catch (error) {
+      setSyncStatus(`ยังเลือกข้อมูลไม่ได้: ${error.message}`);
+    } finally {
+      cloudBusy = false;
+      if (syncAfter) scheduleCloudSync();
+    }
+  }
+  async function startCloudSession(session, initial = true) {
+    cloudSession = session;
+    cloudReady = false;
+    refreshSyncUI('บัญชีเชื่อมต่อแล้ว กำลังโหลดข้อมูล…');
+    await syncAgainstCloud(initial);
+    startCloudPolling();
+  }
+  function startCloudPolling() {
+    clearInterval(cloudPollTimer);
+    cloudPollTimer = setInterval(() => {
+      if (!document.hidden) syncAgainstCloud(false);
+    }, 30000);
+  }
+  async function authenticate(mode) {
+    const form = el('#sync-auth-form');
+    if (!form.reportValidity()) return;
+    const email = el('#sync-email').value.trim();
+    const password = el('#sync-password').value;
+    el('#sync-sign-in').disabled = true;
+    el('#sync-sign-up').disabled = true;
+    setSyncStatus(mode === 'signup' ? 'กำลังสร้างบัญชี…' : 'กำลังเข้าสู่ระบบ…');
+    try {
+      if (mode === 'signup') {
+        const result = await window.MoneyFlowCloud.signUp(email, password);
+        if (!result.session) {
+          setSyncStatus('สร้างบัญชีแล้ว โปรดกดยืนยันจากอีเมลก่อน แล้วจึงกลับมาเข้าสู่ระบบ');
+          return;
+        }
+        await startCloudSession(result.session);
+      } else {
+        await startCloudSession(await window.MoneyFlowCloud.signIn(email, password));
+      }
+    } catch (error) {
+      setSyncStatus(`ทำรายการไม่สำเร็จ: ${error.message}`);
+    } finally {
+      el('#sync-sign-in').disabled = false;
+      el('#sync-sign-up').disabled = false;
+      refreshSyncUI(el('#sync-message').textContent);
+    }
+  }
+  function bindSyncEvents() {
+    const openDialog = () => {
+      refreshSyncUI();
+      el('#sync-dialog').showModal();
+      if (cloudSession && !cloudReady) syncAgainstCloud(true);
+    };
+    el('#sync-open').addEventListener('click', openDialog);
+    el('#sidebar-sync-open').addEventListener('click', openDialog);
+    el('#sync-auth-form').addEventListener('submit', (event) => { event.preventDefault(); authenticate('signin'); });
+    el('#sync-sign-in').addEventListener('click', () => authenticate('signin'));
+    el('#sync-sign-up').addEventListener('click', () => authenticate('signup'));
+    el('#sync-use-cloud').addEventListener('click', () => acceptCloudChoice(true));
+    el('#sync-use-device').addEventListener('click', () => acceptCloudChoice(false));
+    el('#sync-now').addEventListener('click', () => syncAgainstCloud(false));
+    el('#sync-sign-out').addEventListener('click', async () => {
+      try { await window.MoneyFlowCloud.signOut(); } catch (_) { /* Local sign-out still clears the session. */ }
+      cloudSession = null;
+      cloudReady = false;
+      pendingCloudChoice = null;
+      el('#sync-conflict').hidden = true;
+      clearInterval(cloudPollTimer);
+      refreshSyncUI('ออกจากระบบแล้ว ข้อมูลในอุปกรณ์นี้ยังอยู่');
+    });
+    window.addEventListener('online', () => { if (cloudSession) syncAgainstCloud(false); });
+  }
+  function initializeCloudSync() {
+    bindSyncEvents();
+    if (!window.MoneyFlowCloud?.isConfigured()) { refreshSyncUI(); return; }
+    const savedSession = window.MoneyFlowCloud.getSession();
+    if (savedSession) startCloudSession(savedSession, true);
+    else refreshSyncUI();
+  }
+
   function escapeHtml(value) { const node = document.createElement('span'); node.textContent = String(value || ''); return node.innerHTML; }
 
   function setView(view) {
@@ -273,4 +533,5 @@
   fillCategories();
   bindEvents();
   renderAll();
+  initializeCloudSync();
 })();

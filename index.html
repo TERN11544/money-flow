@@ -29,7 +29,8 @@
           </button>
         </nav>
         <div class="sidebar-bottom">
-          <p>ข้อมูลของคุณบันทึก<br />อยู่ในอุปกรณ์นี้</p>
+          <p id="sync-caption">ข้อมูลบันทึกอยู่ในอุปกรณ์นี้</p>
+          <button class="text-button" id="sidebar-sync-open" type="button">ตั้งค่าซิงก์ข้ามอุปกรณ์</button>
           <button class="text-button" id="reset-data" type="button">เริ่มข้อมูลใหม่</button>
         </div>
       </aside>
@@ -41,6 +42,7 @@
             <h1 id="page-title">สวัสดี, วันนี้เงินไหลไปทางไหนบ้าง?</h1>
           </div>
           <div class="top-actions">
+            <button class="sync-open" id="sync-open" type="button"><span aria-hidden="true">☁</span><span id="sync-button-label">ซิงก์</span></button>
             <button class="icon-button" id="theme-toggle" type="button" aria-label="สลับธีมสี">◐</button>
             <button class="primary-button" id="open-transaction" type="button"><span>＋</span> เพิ่มรายการ</button>
           </div>
@@ -164,7 +166,47 @@
       </form>
     </dialog>
 
+    <dialog class="modal" id="sync-dialog" aria-labelledby="sync-dialog-title">
+      <section class="modal-card sync-card">
+        <div class="modal-heading">
+          <div><p class="eyebrow">ข้อมูลส่วนตัว</p><h2 id="sync-dialog-title">ซิงก์ข้ามอุปกรณ์</h2></div>
+          <button class="close-button" type="button" data-close-dialog="sync-dialog" aria-label="ปิด">×</button>
+        </div>
+        <p class="sync-message" id="sync-message" role="status" aria-live="polite">ข้อมูลยังบันทึกในอุปกรณ์นี้</p>
+        <div class="sync-notice" id="sync-not-configured">
+          <strong>ยังไม่ได้เชื่อมต่อ Supabase</strong>
+          <p>ต้องตั้งค่าโปรเจกต์และสร้างตารางฐานข้อมูลก่อน จึงจะเปิดบัญชีและซิงก์ข้อมูลได้ ดูขั้นตอนใน README และใช้เฉพาะ publishable key เท่านั้น</p>
+        </div>
+        <form id="sync-auth-form" class="sync-form" hidden>
+          <label class="field"><span>อีเมล</span><input id="sync-email" type="email" autocomplete="email" required /></label>
+          <label class="field"><span>รหัสผ่าน</span><input id="sync-password" type="password" autocomplete="current-password" minlength="8" required /></label>
+          <div class="sync-actions">
+            <button class="primary-button" id="sync-sign-in" type="button">เข้าสู่ระบบ</button>
+            <button class="secondary-button" id="sync-sign-up" type="button">สร้างบัญชี</button>
+          </div>
+        </form>
+        <div class="sync-account" id="sync-account" hidden>
+          <span>บัญชีที่เชื่อมต่อ</span>
+          <strong id="sync-account-email"></strong>
+          <div class="sync-actions">
+            <button class="secondary-button" id="sync-now" type="button">ซิงก์ตอนนี้</button>
+            <button class="text-button" id="sync-sign-out" type="button">ออกจากระบบ</button>
+          </div>
+        </div>
+        <div class="sync-conflict" id="sync-conflict" hidden>
+          <strong>พบข้อมูลทั้งในอุปกรณ์นี้และคลาวด์</strong>
+          <p id="sync-conflict-copy">เลือกชุดข้อมูลที่จะใช้ ข้อมูลฝั่งที่ไม่ได้เลือกจะถูกเก็บสำรองไว้ในอุปกรณ์นี้ก่อน</p>
+          <div class="sync-actions">
+            <button class="secondary-button" id="sync-use-cloud" type="button">ใช้ข้อมูลจากคลาวด์</button>
+            <button class="primary-button" id="sync-use-device" type="button">อัปโหลดข้อมูลอุปกรณ์นี้</button>
+          </div>
+        </div>
+      </section>
+    </dialog>
+
     <template id="empty-state-template"><div class="empty-state"><span>◌</span><p></p></div></template>
+    <script src="supabase-config.js"></script>
+    <script src="cloud-sync.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
